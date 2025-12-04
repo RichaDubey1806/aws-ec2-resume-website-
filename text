@@ -1,0 +1,27 @@
+
+## Prerequisites
+1. AWS Account with CLI configured
+2. AWS CLI installed and configured
+3. Existing EC2 Key Pair
+4. Git (for cloning repository)
+
+## Deployment Methods
+
+### Method 1: CloudFormation (Recommended)
+```bash
+# Update parameters.json with your KeyName and IP
+# Deploy stack
+aws cloudformation create-stack \
+  --stack-name resume-website \
+  --template-body file://infrastructure/ec2-resume-cloudformation.yaml \
+  --parameters file://infrastructure/parameters.json \
+  --capabilities CAPABILITY_IAM
+
+# Check status
+aws cloudformation describe-stacks --stack-name resume-website
+
+# Get website URL
+aws cloudformation describe-stacks \
+  --stack-name resume-website \
+  --query "Stacks[0].Outputs[?OutputKey=='WebsiteURL'].OutputValue" \
+  --output text
