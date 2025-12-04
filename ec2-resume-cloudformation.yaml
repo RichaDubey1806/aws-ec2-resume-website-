@@ -1,1 +1,317 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Static Resume Website on EC2 with Nginx'
 
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+  SSHLocation:
+    Description: The IP address range that can SSH to the EC2 instance
+    Type: String
+    MinLength: 9
+    MaxLength: 18
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: Must be a valid IP CIDR range (e.g., 123.123.123.123/32)
+
+Resources:
+  ResumeVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: ResumeWebsiteVPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ResumeVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: ResumePublicSubnet
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ResumeIGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref ResumeVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ResumeVPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH and HTTP access
+      VpcId: !Ref ResumeVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: ResumeInstanceSG
+
+  ResumeEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      ImageId: ami-0c55b159cbfafe1f0  # Ubuntu 20.04 LTS (us-east-1)
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: ResumeWebsite
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get upgrade -y
+          
+          # Install Nginx
+          apt-get install nginx -y
+          systemctl start nginx
+          systemctl enable nginx
+          
+          # Install basic security tools
+          apt-get install fail2ban -y
+          systemctl start fail2ban
+          systemctl enable fail2ban
+          
+          # Create website directory
+          mkdir -p /var/www/resume
+          
+          # Create basic index.html
+          cat <<EOF > /var/www/resume/index.html
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>My Resume - AWS Hosted</title>
+              <style>
+                  body {
+                      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                      line-height: 1.6;
+                      color: #333;
+                      max-width: 800px;
+                      margin: 0 auto;
+                      padding: 20px;
+                      background-color: #f5f5f5;
+                  }
+                  .header {
+                      text-align: center;
+                      padding: 30px 0;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      color: white;
+                      border-radius: 10px;
+                      margin-bottom: 30px;
+                  }
+                  .contact-info {
+                      background: white;
+                      padding: 20px;
+                      border-radius: 10px;
+                      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                      margin-bottom: 20px;
+                  }
+                  .section {
+                      background: white;
+                      padding: 20px;
+                      border-radius: 10px;
+                      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                      margin-bottom: 20px;
+                  }
+                  h1 {
+                      margin: 0;
+                      font-size: 2.5em;
+                  }
+                  h2 {
+                      color: #667eea;
+                      border-bottom: 2px solid #667eea;
+                      padding-bottom: 5px;
+                  }
+                  .skill-tag {
+                      display: inline-block;
+                      background: #667eea;
+                      color: white;
+                      padding: 5px 10px;
+                      border-radius: 20px;
+                      margin: 5px;
+                      font-size: 0.9em;
+                  }
+                  footer {
+                      text-align: center;
+                      margin-top: 40px;
+                      padding: 20px;
+                      color: #666;
+                      font-size: 0.9em;
+                  }
+                  .aws-badge {
+                      display: inline-block;
+                      background: #FF9900;
+                      color: white;
+                      padding: 5px 15px;
+                      border-radius: 5px;
+                      font-weight: bold;
+                      margin-top: 10px;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="header">
+                  <h1>JOHN DOE</h1>
+                  <p>Cloud Engineer & DevOps Specialist</p>
+                  <div class="aws-badge">AWS Hosted Resume</div>
+              </div>
+              
+              <div class="contact-info">
+                  <p>📧 john.doe@email.com | 📱 (123) 456-7890 | 🌐 www.johndoeportfolio.com</p>
+                  <p>📍 San Francisco, CA | 🔗 linkedin.com/in/johndoe | 🐙 github.com/johndoe</p>
+              </div>
+              
+              <div class="section">
+                  <h2>Professional Summary</h2>
+                  <p>Experienced Cloud Engineer with 5+ years of expertise in AWS infrastructure, 
+                  DevOps practices, and scalable web application deployment. Proven ability to design, 
+                  implement, and maintain secure and efficient cloud solutions.</p>
+              </div>
+              
+              <div class="section">
+                  <h2>Technical Skills</h2>
+                  <div>
+                      <span class="skill-tag">AWS (EC2, S3, RDS, VPC)</span>
+                      <span class="skill-tag">Docker & Kubernetes</span>
+                      <span class="skill-tag">Terraform & CloudFormation</span>
+                      <span class="skill-tag">Python & Bash Scripting</span>
+                      <span class="skill-tag">Nginx/Apache</span>
+                      <span class="skill-tag">CI/CD (Jenkins, GitLab CI)</span>
+                      <span class="skill-tag">Linux Administration</span>
+                      <span class="skill-tag">Monitoring (CloudWatch)</span>
+                  </div>
+              </div>
+              
+              <div class="section">
+                  <h2>Work Experience</h2>
+                  <h3>Senior Cloud Engineer - Tech Solutions Inc. (2020-Present)</h3>
+                  <ul>
+                      <li>Designed and deployed AWS infrastructure hosting 50+ microservices</li>
+                      <li>Reduced infrastructure costs by 30% through rightsizing and automation</li>
+                      <li>Implemented CI/CD pipelines reducing deployment time by 70%</li>
+                  </ul>
+                  
+                  <h3>DevOps Engineer - Cloud Innovations (2018-2020)</h3>
+                  <ul>
+                      <li>Managed Kubernetes clusters with 100+ pods</li>
+                      <li>Automated infrastructure provisioning using Terraform</li>
+                      <li>Improved system uptime from 99.5% to 99.95%</li>
+                  </ul>
+              </div>
+              
+              <div class="section">
+                  <h2>Certifications</h2>
+                  <ul>
+                      <li>AWS Certified Solutions Architect - Associate</li>
+                      <li>AWS Certified DevOps Engineer - Professional</li>
+                      <li>Kubernetes Certified Administrator (CKA)</li>
+                      <li>Terraform Associate Certification</li>
+                  </ul>
+              </div>
+              
+              <footer>
+                  <p>This resume is hosted on an AWS EC2 instance with Nginx | 
+                  Instance ID: ${ResumeEC2Instance} | 
+                  Last Updated: April 2024</p>
+              </footer>
+          </body>
+          </html>
+          EOF
+          
+          # Configure Nginx
+          cat <<EOF > /etc/nginx/sites-available/resume
+          server {
+              listen 80;
+              listen [::]:80;
+              
+              root /var/www/resume;
+              index index.html;
+              
+              server_name _;
+              
+              location / {
+                  try_files \$uri \$uri/ =404;
+              }
+              
+              # Security headers
+              add_header X-Frame-Options "SAMEORIGIN" always;
+              add_header X-Content-Type-Options "nosniff" always;
+              add_header X-XSS-Protection "1; mode=block" always;
+          }
+          EOF
+          
+          # Enable the site
+          ln -sf /etc/nginx/sites-available/resume /etc/nginx/sites-enabled/
+          rm -f /etc/nginx/sites-enabled/default
+          
+          # Restart Nginx
+          systemctl restart nginx
+          
+          # Update system and remove unnecessary packages
+          apt-get autoremove -y
+          apt-get clean
+          
+          # Create a simple health check script
+          cat <<EOF > /var/www/resume/health.html
+          <html><body><h1>System is Healthy</h1><p>Instance: \$(hostname)</p></body></html>
+          EOF
+          
+          echo "Setup completed successfully!"
+
+Outputs:
+  InstanceId:
+    Description: Instance ID of the EC2 instance
+    Value: !Ref ResumeEC2Instance
+  PublicIP:
+    Description: Public IP address of the EC2 instance
+    Value: !GetAtt ResumeEC2Instance.PublicIp
+  WebsiteURL:
+    Description: URL to access the resume website
+    Value: !Sub http://${ResumeEC2Instance.PublicIp}
